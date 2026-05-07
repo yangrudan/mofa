@@ -123,7 +123,57 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_role() {
-        assert!(true);
+        let bus = Arc::new(AgentBus::new());
+        let coordinator =
+            AgentCoordinator::new(bus.clone(), CoordinationStrategy::PeerToPeer).await;
+
+        // Registering a new role should succeed
+        assert!(
+            coordinator.register_role("agent_1", "worker").await.is_ok(),
+            "first register_role call should succeed"
+        );
+
+        // The role mapping should contain the registered agent
+        {
+            let role_map = coordinator.role_mapping.read().await;
+            let workers = role_map.get("worker").expect("worker role should exist");
+            assert!(
+                workers.contains(&"agent_1".to_string()),
+                "agent_1 should be registered under worker"
+            );
+        }
+
+        // Registering a second agent under the same role should accumulate, not overwrite
+        coordinator
+            .register_role("agent_2", "worker")
+            .await
+            .unwrap();
+        {
+            let role_map = coordinator.role_mapping.read().await;
+            let workers = role_map.get("worker").unwrap();
+            assert_eq!(workers.len(), 2, "both agents should be under worker role");
+            assert!(workers.contains(&"agent_1".to_string()));
+            assert!(workers.contains(&"agent_2".to_string()));
+        }
+
+        // Registering under a different role must not affect existing roles
+        coordinator
+            .register_role("agent_3", "manager")
+            .await
+            .unwrap();
+        {
+            let role_map = coordinator.role_mapping.read().await;
+            assert_eq!(
+                role_map.get("worker").unwrap().len(),
+                2,
+                "worker role should still have 2 agents"
+            );
+            assert_eq!(
+                role_map.get("manager").unwrap().len(),
+                1,
+                "manager role should have exactly 1 agent"
+            );
+        }
     }
 
     #[tokio::test]
